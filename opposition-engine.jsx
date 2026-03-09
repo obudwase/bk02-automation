@@ -182,25 +182,14 @@ Return ONLY valid JSON, no markdown:
   {
     id:"collision_map", num:"IX", title:"THE COLLISION MAP", tag:"Villain Engine", part:1,
     note:"Mapping all six collision zones…",
-    maxTokens: 2000,
+    maxTokens: 4000,
     getSystem:(p,a,c)=>`You are an Opposition Engine expert. Generate the complete six-zone Collision Map.
 
-PROTAGONIST ENGINE:
-Type/Wing: ${orFB(p?.wing_reflex?.type_wing)} | Reflex: ${safe(p?.wing_reflex?.compound_reflex,100)}
-Belief: ${safe(p?.core_belief?.core_belief,100)} | Schema: ${orFB(p?.schema_coping?.schema)} — "${orFB(p?.schema_coping?.schema_message)}"
-Triggers: ${jstr(p?.schema_coping?.triggers)} | Coping: ${orFB(p?.schema_coping?.primary_coping_mode)}
-Failure: ${safe(p?.schema_coping?.failure_cascade,80)} | Hidden: ${safe(p?.schema_coping?.hidden_mode,80)}
-WNCL: ${safe(p?.ruling_passion?.will_not_cross,100)}
-Physical: STR${p?.chassis?.physical?.str} DEX${p?.chassis?.physical?.dex} CON${p?.chassis?.physical?.con} INT${p?.chassis?.physical?.int} WIS${p?.chassis?.physical?.wis} CHA${p?.chassis?.physical?.cha}
-Social: RANK${p?.chassis?.social?.rank} CONN${p?.chassis?.social?.connections} RES${p?.chassis?.social?.resources} TRAIN${p?.chassis?.social?.training} REP${p?.chassis?.social?.reputation} OBL${p?.chassis?.social?.obligation}
+PROTAGONIST: ${orFB(p?.wing_reflex?.type_wing)} | Reflex: ${safe(p?.wing_reflex?.compound_reflex,80)} | Schema: ${orFB(p?.schema_coping?.schema)} "${safe(p?.schema_coping?.schema_message,80)}" | Coping: ${orFB(p?.schema_coping?.primary_coping_mode)} | WNCL: ${safe(p?.ruling_passion?.will_not_cross,80)} | Physical peaks: STR${p?.chassis?.physical?.str} CON${p?.chassis?.physical?.con} CHA${p?.chassis?.physical?.cha} INT${p?.chassis?.physical?.int} | Social: RANK${p?.chassis?.social?.rank} OBL${p?.chassis?.social?.obligation} REP${p?.chassis?.social?.reputation}
+PROTAGONIST Belief: ${safe(p?.core_belief?.core_belief,120)} | Failure cascade: ${safe(p?.schema_coping?.failure_cascade,80)}
 
-ANTAGONIST ENGINE:
-Type/Wing: ${orFB(a?.wing_reflex?.type_wing)} | Reflex: ${safe(a?.wing_reflex?.compound_reflex,100)}
-Belief: ${safe(a?.core_belief?.core_belief,100)} | Schema: ${orFB(a?.schema_coping?.schema)} — "${orFB(a?.schema_coping?.schema_message)}"
-Triggers: ${jstr(a?.schema_coping?.triggers)} | Coping: ${orFB(a?.schema_coping?.primary_coping_mode)}
-WNCL: ${safe(a?.ruling_passion?.will_not_cross,100)}
-Physical: STR${a?.chassis?.physical?.str} DEX${a?.chassis?.physical?.dex} CON${a?.chassis?.physical?.con} INT${a?.chassis?.physical?.int} WIS${a?.chassis?.physical?.wis} CHA${a?.chassis?.physical?.cha}
-Social: RANK${a?.chassis?.social?.rank} CONN${a?.chassis?.social?.connections} RES${a?.chassis?.social?.resources} TRAIN${a?.chassis?.social?.training} REP${a?.chassis?.social?.reputation} OBL${a?.chassis?.social?.obligation}
+ANTAGONIST: ${orFB(a?.wing_reflex?.type_wing)} | Reflex: ${safe(a?.wing_reflex?.compound_reflex,80)} | Schema: ${orFB(a?.schema_coping?.schema)} "${safe(a?.schema_coping?.schema_message,80)}" | Coping: ${orFB(a?.schema_coping?.primary_coping_mode)} | WNCL: ${safe(a?.ruling_passion?.will_not_cross,80)} | Physical peaks: STR${a?.chassis?.physical?.str} CON${a?.chassis?.physical?.con} CHA${a?.chassis?.physical?.cha} INT${a?.chassis?.physical?.int} | Social: RANK${a?.chassis?.social?.rank} OBL${a?.chassis?.social?.obligation} REP${a?.chassis?.social?.reputation}
+ANTAGONIST Belief: ${safe(a?.core_belief?.core_belief,120)} | Failure cascade: ${safe(a?.schema_coping?.failure_cascade,80)}
 
 SIX ZONES:
 1. SCHEMA TRIGGER EXCHANGE — how each character's coping triggers the other's schema (as byproduct, not intent)
@@ -356,6 +345,61 @@ Return ONLY valid JSON, no markdown:
 // ═══════════════════════════════════════════════════════════════════
 // API CALL
 // ═══════════════════════════════════════════════════════════════════
+function repairJSON(raw) {
+  // 1. Strip markdown fences
+  let s = raw.replace(/```json\n?|```/g, "").trim();
+  // 2. Try parsing as-is
+  try { return JSON.parse(s); } catch (_) {}
+  // 3. Truncation repair: walk backwards to last complete top-level value
+  // Close any open strings, arrays, objects
+  let depth = 0; let inStr = false; let escape = false; let lastSafe = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\" && inStr) { escape = true; continue; }
+    if (ch === '"' && !escape) { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === "{" || ch === "[") { depth++; continue; }
+    if (ch === "}" || ch === "]") { depth--; if (depth === 0) lastSafe = i; continue; }
+  }
+  // Truncated: close open structures
+  if (depth > 0) {
+    // Drop incomplete last key/value by trimming to last comma at depth 1
+    let trimmed = s;
+    // Find last comma not inside a string at depth 1
+    let d2 = 0; let inS2 = false; let esc2 = false; let lastComma = -1;
+    for (let i = 0; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+      if (esc2) { esc2 = false; continue; }
+      if (ch === "\\" && inS2) { esc2 = true; continue; }
+      if (ch === '"') { inS2 = !inS2; continue; }
+      if (inS2) continue;
+      if (ch === "{" || ch === "[") d2++;
+      else if (ch === "}" || ch === "]") d2--;
+      else if (ch === "," && d2 === 1) lastComma = i;
+    }
+    if (lastComma > 0) trimmed = trimmed.substring(0, lastComma);
+    // Re-count depth and close
+    let closeDepth = 0; let inS3 = false; let esc3 = false;
+    const stack = [];
+    for (let i = 0; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+      if (esc3) { esc3 = false; continue; }
+      if (ch === "\\" && inS3) { esc3 = true; continue; }
+      if (ch === '"') { inS3 = !inS3; continue; }
+      if (inS3) continue;
+      if (ch === "{") stack.push("}");
+      else if (ch === "[") stack.push("]");
+      else if (ch === "}" || ch === "]") stack.pop();
+    }
+    const closing = stack.reverse().join("");
+    try { return JSON.parse(trimmed + closing); } catch (_) {}
+    // Fallback: just close at lastSafe
+    try { return JSON.parse(s.substring(0, lastSafe + 1)); } catch (_) {}
+  }
+  throw new Error("Could not parse or repair JSON response.");
+}
+
 async function callClaude(system, maxTokens = 1500) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -370,8 +414,7 @@ async function callClaude(system, maxTokens = 1500) {
   if (!res.ok) throw new Error(`API error ${res.status}: ${res.statusText}`);
   const data = await res.json();
   const text = data.content?.map(b => b.text || "").join("") || "";
-  const clean = text.replace(/```json\n?|```/g, "").trim();
-  return JSON.parse(clean);
+  return repairJSON(text);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -385,7 +428,7 @@ function Field({ label, value, large, dim, style }) {
   return (
     <div style={{ marginBottom: "14px", ...style }}>
       <Lbl>{label}</Lbl>
-      <div style={{ ...sty.val, fontSize: large ? "16px" : "15px", color: dim ? C.dim : C.text }}>{value}</div>
+      <div style={{ ...sty.val, fontSize: large ? "16px" : "15px", color: dim ? C.dim : C.text, whiteSpace: "pre-wrap" }}>{value}</div>
     </div>
   );
 }
@@ -817,7 +860,7 @@ function ProtRefPanel({ prot, stepId }) {
           {fields.map(([lbl, path]) => {
             const val = getNestedVal(prot, path);
             if (!val) return null;
-            const display = Array.isArray(val) ? val.join(" · ") : String(val).substring(0, 200);
+            const display = Array.isArray(val) ? val.join("\n") : String(val);
             return <Field key={path} label={lbl} value={display} dim />;
           })}
         </div>
@@ -881,13 +924,44 @@ function ImportScreen({ onConfirm }) {
   const [showRaw, setShowRaw] = useState(false);
   const fileRef = useState(null)[0];
 
+  const normalizeFlat = (d) => {
+    // Parse type number + name from strings like "The Gladiator is an 8w9 Sovereign."
+    const twMatch = (d.type_wing_statement || "").match(/(\d+)w(\d+)\s+(\w+)/);
+    const typeNum  = twMatch ? parseInt(twMatch[1]) : 8;
+    const wingNum  = twMatch ? parseInt(twMatch[2]) : 9;
+    const typeWing = twMatch ? `${twMatch[1]}w${twMatch[2]}` : "8w9";
+    // Parse archetype cluster from "The X is a Y from the Z cluster."
+    const archMatch = (d.archetype_statement || "").match(/is a (.+?) from the (\w+) cluster/i);
+    const archetype = archMatch ? archMatch[1] : "";
+    const cluster   = archMatch ? archMatch[2] : "";
+
+    const TYPE_NAMES = {1:"Reformer",2:"Helper",3:"Achiever",4:"Individualist",5:"Investigator",6:"Loyalist",7:"Enthusiast",8:"Challenger",9:"Peacemaker"};
+    const TYPE_FEARS = {1:"being corrupt or wrong",2:"being unloved",3:"being worthless",4:"having no identity or significance",5:"being helpless or incompetent",6:"being without support",7:"being trapped or in pain",8:"being controlled or harmed by others",9:"loss of connection"};
+    const TYPE_DESIRES= {1:"integrity",2:"love",3:"value and admiration",4:"significance",5:"competence and understanding",6:"security",7:"freedom",8:"autonomy and control",9:"peace"};
+
+    return {
+      seed: { text: d.character_name || d.engine_summary || "", files: [] },
+      archetype: { cluster, archetype, reasoning: "", friction_note: "", output: d.archetype_statement || "" },
+      enneagram: { type_number: typeNum, type_name: TYPE_NAMES[typeNum] || "", core_fear: TYPE_FEARS[typeNum] || "", core_desire: TYPE_DESIRES[typeNum] || "", pressure_reflex: "", reasoning: "", output: d.type_wing_statement || "" },
+      wing_reflex: { wing: wingNum, type_wing: typeWing, wing_description: "", wing_friction: "", compound_reflex: d.compound_reflex || "", output: d.type_wing_statement || "" },
+      core_belief: { core_belief: d.core_belief || "", how_it_drives: "", how_it_will_fail: "", output: d.core_belief || "" },
+      ruling_passion: { specific_object: d.ruling_passion?.specific_object || "", theory_of_achievement: d.ruling_passion?.theory_of_achievement || "", will_not_cross: d.ruling_passion?.will_not_cross || "", pressure_triangle: "" },
+      wound: { wound_event: d.wound_summary || "", wound_type: "acute", lesson_learned: d.schema_message || "", sensory_triggers: [], connection_to_passion: "" },
+      schema_coping: { schema: d.schema || "", schema_message: d.schema_message || "", triggers: [], primary_coping_mode: d.coping_modes?.primary || "", primary_description: d.coping_modes?.primary_description || "", failure_cascade: d.coping_modes?.failure_cascade || "", hidden_mode: d.coping_modes?.hidden_mode || "" },
+      mismatch: { mismatch_statement: d.mismatch_statement || "", vector_1_schema: "", vector_2_theory: "", vector_3_line: "", vector_4_coping: "", mvo_sketch: { creates_triggers: d.opposition?.creates_triggers || d.mvo_sketch?.creates_triggers || "", defeats_theory: d.opposition?.defeats_theory || d.mvo_sketch?.defeats_theory || "", pressures_line: d.opposition?.pressures_line || d.mvo_sketch?.pressures_line || "", defeats_coping: d.opposition?.defeats_coping || d.mvo_sketch?.defeats_coping || "" } },
+      chassis: { physical: { str: d.chassis?.physical?.str||0, dex: d.chassis?.physical?.dex||0, con: d.chassis?.physical?.con||0, int: d.chassis?.physical?.int||0, wis: d.chassis?.physical?.wis||0, cha: d.chassis?.physical?.cha||0, friction_statement: d.chassis?.physical?.friction_statement||"" }, social: { rank: d.chassis?.social?.rank||0, connections: d.chassis?.social?.connections||0, resources: d.chassis?.social?.resources||0, training: d.chassis?.social?.training||0, reputation: d.chassis?.social?.reputation||0, obligation: d.chassis?.social?.obligation||0, friction_statement: d.chassis?.social?.friction_statement||"" } }
+    };
+  };
+
   const parseJSON = useCallback((text) => {
     try {
       const data = JSON.parse(text);
-      // Accept either the full character object or a wrapped export
-      const charData = data.character || data.protagonist || data;
-      if (!charData.enneagram && !charData.wing_reflex) throw new Error("Doesn't look like a Character Engine Sheet.");
-      setProt(charData); setErr(null);
+      const raw = data.character || data.protagonist || data;
+      // If it already has nested structure, use as-is
+      if (raw.enneagram || raw.wing_reflex) { setProt(raw); setErr(null); return; }
+      // If it has flat Book 1 export keys, normalize
+      if (raw.compound_reflex || raw.schema || raw.chassis) { setProt(normalizeFlat(raw)); setErr(null); return; }
+      throw new Error("File doesn't contain recognizable Character Engine Sheet data. Expected Book 1 app export (.json).");
     } catch (e) { setErr(e.message); }
   }, []);
 
