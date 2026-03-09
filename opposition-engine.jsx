@@ -401,19 +401,20 @@ function repairJSON(raw) {
 }
 
 async function callClaude(system, maxTokens = 1500) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch("/oe-automation/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
       max_tokens: maxTokens,
-      system,
-      messages: [{ role: "user", content: "Generate the output now. Return only valid JSON with no markdown fences." }],
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: "Generate the output now. Return only valid JSON with no markdown fences." },
+      ],
     }),
   });
   if (!res.ok) throw new Error(`API error ${res.status}: ${res.statusText}`);
   const data = await res.json();
-  const text = data.content?.map(b => b.text || "").join("") || "";
+  const text = data.choices?.[0]?.message?.content || "";
   return repairJSON(text);
 }
 
