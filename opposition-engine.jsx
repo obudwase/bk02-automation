@@ -419,6 +419,64 @@ async function callClaude(system, maxTokens = 1500) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// MARKDOWN EXPORT
+// ═══════════════════════════════════════════════════════════════════
+function valueToMd(val, depth = 3) {
+  if (val === null || val === undefined || val === "") return "";
+  if (typeof val === "boolean") return val ? "Yes" : "No";
+  if (typeof val === "number") return String(val);
+  if (typeof val === "string") return val;
+  if (Array.isArray(val)) {
+    return val.filter(v => v !== null && v !== undefined && v !== "").map(item => {
+      if (typeof item === "object" && item !== null) {
+        return Object.entries(item)
+          .filter(([, v]) => v)
+          .map(([k, v]) => `- **${k.replace(/_/g, " ")}**: ${typeof v === "object" ? JSON.stringify(v) : v}`)
+          .join("\n");
+      }
+      return `- ${item}`;
+    }).join("\n");
+  }
+  if (typeof val === "object") {
+    const h = "#".repeat(Math.min(depth, 6));
+    return Object.entries(val)
+      .filter(([, v]) => v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0))
+      .map(([k, v]) => {
+        const label = k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+        if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+          return `${h} ${label}\n\n${v}`;
+        }
+        return `${h} ${label}\n\n${valueToMd(v, depth + 1)}`;
+      }).join("\n\n");
+  }
+  return String(val);
+}
+
+function stepFilename(step) {
+  const num = String(STEPS.findIndex(s => s.id === step.id) + 1).padStart(2, "0");
+  const title = step.title
+    .replace(/'/g, "")
+    .replace(/[^a-zA-Z\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join("");
+  return `Step${num}${title}`;
+}
+
+function downloadStepMarkdown(step, output) {
+  const header = `# ${step.num} — ${step.title}\n\n`;
+  const body = valueToMd(output);
+  const blob = new Blob([header + body], { type: "text/markdown" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${stepFilename(step)}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // SMALL UI COMPONENTS
 // ═══════════════════════════════════════════════════════════════════
 function Lbl({ children, style }) {
@@ -873,8 +931,12 @@ function ProtRefPanel({ prot, stepId }) {
 // ═══════════════════════════════════════════════════════════════════
 // WELCOME SCREEN
 // ═══════════════════════════════════════════════════════════════════
-function WelcomeScreen({ onBegin }) {
+function WelcomeScreen({ onBegin, savedSession, onResume }) {
   const [hov, setHov] = useState(false);
+  const doneCount = savedSession ? Object.values(savedSession.antagonist).filter(Boolean).length : 0;
+  const savedStep = savedSession ? STEPS[savedSession.stepIdx] : null;
+  const savedDate = savedSession ? new Date(savedSession.savedAt).toLocaleDateString() : null;
+
   return (
     <div style={{ minHeight:"100vh", background:C.bg, display:"flex", flexDirection:"column",
       alignItems:"center", justifyContent:"center", padding:"40px",
@@ -898,12 +960,42 @@ function WelcomeScreen({ onBegin }) {
             <div key={t} style={{ fontFamily:F.mono, fontSize:"10px", letterSpacing:"0.15em", color:C.faint, textTransform:"uppercase" }}>{t}</div>
           ))}
         </div>
+
+        {savedSession && (
+          <div style={{ border:`1px solid ${C.borderGold}`, background:C.card, padding:"20px", marginBottom:"24px", textAlign:"left" }}>
+            <div style={{ fontFamily:F.mono, fontSize:"9px", letterSpacing:"0.2em", color:C.gold, textTransform:"uppercase", marginBottom:"12px" }}>
+              Session Saved — {savedDate}
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px", marginBottom:"16px" }}>
+              <div>
+                <div style={{ fontFamily:F.mono, fontSize:"9px", color:C.dim, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:"3px" }}>Progress</div>
+                <div style={{ fontFamily:F.serif, fontSize:"14px", color:C.text }}>{doneCount} / {STEPS.length} steps confirmed</div>
+              </div>
+              {savedStep && (
+                <div>
+                  <div style={{ fontFamily:F.mono, fontSize:"9px", color:C.dim, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:"3px" }}>Current Step</div>
+                  <div style={{ fontFamily:F.serif, fontSize:"14px", color:C.text }}>{savedStep.num} — {savedStep.title}</div>
+                </div>
+              )}
+              {savedSession.protagonist?.wing_reflex?.type_wing && (
+                <div>
+                  <div style={{ fontFamily:F.mono, fontSize:"9px", color:C.dim, textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:"3px" }}>Protagonist</div>
+                  <div style={{ fontFamily:F.serif, fontSize:"14px", color:C.text }}>{savedSession.protagonist.wing_reflex.type_wing}</div>
+                </div>
+              )}
+            </div>
+            <button onClick={onResume} style={{ ...sty.btn("gold"), padding:"11px 32px", marginRight:"12px" }}>
+              Resume Session →
+            </button>
+          </div>
+        )}
+
         <button
           onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
           onClick={onBegin}
           style={{ ...sty.btn("red"), padding:"14px 48px", fontSize:"12px", letterSpacing:"0.2em",
             background:hov?C.redMuted:C.redDim, color:hov?C.white:C.red }}>
-          Begin Opposition Build
+          {savedSession ? "Start New Build" : "Begin Opposition Build"}
         </button>
         <div style={{ fontFamily:F.mono, fontSize:"10px", color:C.faint, marginTop:"20px", letterSpacing:"0.08em" }}>
           Requires completed Book 1 Character Engine Sheet
@@ -1058,14 +1150,25 @@ function ImportScreen({ onConfirm }) {
 // ═══════════════════════════════════════════════════════════════════
 // SIDEBAR
 // ═══════════════════════════════════════════════════════════════════
-function Sidebar({ stepIdx, antagonist, onSelect, onSheet }) {
+function Sidebar({ stepIdx, antagonist, onSelect, onSheet, onHome }) {
   const allDone = STEPS.every(s => !!antagonist[s.id]);
   return (
     <div style={{ width:"220px", background:C.panel, borderRight:`1px solid ${C.border}`, padding:"20px 0",
       overflowY:"auto", flexShrink:0, display:"flex", flexDirection:"column" }}>
       <div style={{ padding:"0 16px 20px", borderBottom:`1px solid ${C.border}` }}>
-        <div style={{ fontFamily:F.mono, fontSize:"8px", letterSpacing:"0.25em", color:C.dim, textTransform:"uppercase", marginBottom:"4px" }}>Book Two</div>
-        <div style={{ fontFamily:F.serif, fontSize:"16px", color:C.white }}>Opposition<br /><span style={{ color:C.red, fontStyle:"italic" }}>Engine</span></div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+          <div>
+            <div style={{ fontFamily:F.mono, fontSize:"8px", letterSpacing:"0.25em", color:C.dim, textTransform:"uppercase", marginBottom:"4px" }}>Book Two</div>
+            <div style={{ fontFamily:F.serif, fontSize:"16px", color:C.white }}>Opposition<br /><span style={{ color:C.red, fontStyle:"italic" }}>Engine</span></div>
+          </div>
+          {onHome && (
+            <button onClick={onHome} title="Return to welcome screen"
+              style={{ ...sty.btn(""), fontFamily:F.mono, fontSize:"9px", letterSpacing:"0.12em",
+                padding:"6px 12px", color:C.dim, alignSelf:"flex-start" }}>
+              ⌂ Home
+            </button>
+          )}
+        </div>
       </div>
       <div style={{ padding:"12px 0", flex:1 }}>
         {PART_STEPS.map(([start,end], partIdx) => (
@@ -1120,9 +1223,18 @@ function StepView({ step, stepIdx, prot, ant, concept, output, loading, error, o
   const partLabel = PART_LABELS[step.part - 1];
   const isFirst = step.isSemiManual && !output && !loading;
   const confirmed = !!ant[step.id];
+  const [showNote, setShowNote] = useState(false);
+  const [regenNote, setRegenNote] = useState("");
 
   // Show confirmed output if re-visiting a done step
   const displayOutput = output || (confirmed ? ant[step.id] : null);
+
+  function submitRegen() {
+    const note = regenNote.trim();
+    setShowNote(false);
+    setRegenNote("");
+    onRegenerate(note);
+  }
 
   return (
     <div style={{ flex:1, overflowY:"auto", padding:"32px 40px", maxWidth:"900px" }}>
@@ -1187,7 +1299,7 @@ function StepView({ step, stepIdx, prot, ant, concept, output, loading, error, o
 
       {/* Action buttons */}
       {!loading && (
-        <div style={{ display:"flex", gap:"12px", alignItems:"center", paddingTop:"8px",
+        <div style={{ display:"flex", gap:"12px", alignItems:"center", flexWrap:"wrap", paddingTop:"8px",
           borderTop:`1px solid ${C.border}`, marginTop:"8px" }}>
           {isFirst && (
             <button onClick={onGenerate} style={{ ...sty.btn("red"), padding:"12px 32px" }}>
@@ -1197,7 +1309,11 @@ function StepView({ step, stepIdx, prot, ant, concept, output, loading, error, o
           {output && !confirmed && (
             <>
               <button onClick={onConfirm} style={{ ...sty.btn("red"), padding:"12px 32px" }}>Confirm & Continue →</button>
-              <button onClick={onRegenerate} style={sty.btn("")}>Regenerate</button>
+              {!showNote && (
+                <button onClick={() => setShowNote(true)} style={{ ...sty.btn(""), color: C.dim }}>
+                  Regenerate
+                </button>
+              )}
               {step.isOptional && onSkip && (
                 <button onClick={onSkip} style={{ ...sty.btn(""), color:C.faint }}>Skip (Standalone Story)</button>
               )}
@@ -1215,6 +1331,35 @@ function StepView({ step, stepIdx, prot, ant, concept, output, loading, error, o
               )}
             </div>
           )}
+          {displayOutput && (
+            <button onClick={() => downloadStepMarkdown(step, displayOutput)} style={{ ...sty.btn("gold"), marginLeft:"auto" }}>
+              ↓ Download .md
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Regenerate with note panel */}
+      {showNote && !loading && (
+        <div style={{ marginTop:"12px", border:`1px solid ${C.borderGold}`, background:C.panel, padding:"16px" }}>
+          <Lbl style={{ color:C.gold, marginBottom:"8px" }}>Direction for regeneration <span style={{ color:C.faint }}>(optional)</span></Lbl>
+          <textarea
+            autoFocus
+            value={regenNote}
+            onChange={e => setRegenNote(e.target.value)}
+            placeholder="e.g. Make the wound more specific to the world. Push the collision harder."
+            style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`, color:C.text,
+              fontFamily:F.serif, fontSize:"14px", padding:"10px 14px", resize:"vertical",
+              boxSizing:"border-box", minHeight:"80px", marginBottom:"12px" }}
+          />
+          <div style={{ display:"flex", gap:"10px" }}>
+            <button onClick={submitRegen} style={{ ...sty.btn("red"), padding:"10px 28px" }}>
+              Regenerate →
+            </button>
+            <button onClick={() => { setShowNote(false); setRegenNote(""); }} style={{ ...sty.btn(""), color: C.faint }}>
+              Cancel
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -1579,6 +1724,30 @@ function OppositionSheet({ prot, ant, onReset }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// SESSION PERSISTENCE
+// ═══════════════════════════════════════════════════════════════════
+const SESSION_KEY = "oe_session";
+
+function saveSession(protagonist, antagonist, concept, stepIdx) {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      protagonist, antagonist, concept, stepIdx, savedAt: Date.now(),
+    }));
+  } catch (_) {}
+}
+
+function loadSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+
+function clearSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // ROOT APP
 // ═══════════════════════════════════════════════════════════════════
 export default function App() {
@@ -1590,6 +1759,7 @@ export default function App() {
   const [output, setOutput]         = useState(null);
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState(null);
+  const [savedSession, setSavedSession] = useState(() => loadSession());
 
   const step = STEPS[stepIdx];
 
@@ -1601,10 +1771,11 @@ export default function App() {
     handleGenerate();
   }, [stepIdx, phase]);
 
-  async function handleGenerate() {
+  async function handleGenerate(note = "") {
     setLoading(true); setError(null);
     try {
-      const system = step.getSystem(protagonist, antagonist, concept);
+      let system = step.getSystem(protagonist, antagonist, concept);
+      if (note) system += `\n\nDIRECTION FROM AUTHOR:\n${note}`;
       const result = await callClaude(system, step.maxTokens || 1500);
       setOutput(result);
     } catch (e) {
@@ -1615,19 +1786,22 @@ export default function App() {
   }
 
   function handleConfirm() {
-    setAntagonist(prev => ({ ...prev, [step.id]: output }));
+    const nextAntagonist = { ...antagonist, [step.id]: output };
+    const nextStepIdx = stepIdx + 1;
+    setAntagonist(nextAntagonist);
     setOutput(null);
     if (stepIdx === STEPS.length - 1) {
       setPhase("sheet");
     } else {
-      setStepIdx(stepIdx + 1);
+      setStepIdx(nextStepIdx);
+      saveSession(protagonist, nextAntagonist, concept, nextStepIdx);
     }
   }
 
-  function handleRegenerate() {
+  function handleRegenerate(note = "") {
     setOutput(null);
     setError(null);
-    setTimeout(handleGenerate, 50);
+    setTimeout(() => handleGenerate(note), 50);
   }
 
   function handleSkip() {
@@ -1638,13 +1812,25 @@ export default function App() {
   }
 
   function handleReset() {
+    clearSession();
+    setSavedSession(null);
     setPhase("welcome"); setStepIdx(0); setProtagonist(null);
     setAntagonist({}); setConcept(""); setOutput(null);
     setLoading(false); setError(null);
   }
 
+  function handleResume() {
+    const session = loadSession();
+    if (!session) return;
+    setProtagonist(session.protagonist);
+    setAntagonist(session.antagonist);
+    setConcept(session.concept);
+    setStepIdx(session.stepIdx);
+    setPhase("building");
+  }
+
   if (phase === "welcome") {
-    return <WelcomeScreen onBegin={() => setPhase("import")} />;
+    return <WelcomeScreen onBegin={() => setPhase("import")} savedSession={savedSession} onResume={handleResume} />;
   }
 
   if (phase === "import") {
@@ -1657,7 +1843,7 @@ export default function App() {
   if (phase === "sheet") {
     return (
       <div style={{ display:"flex", height:"100vh", background:C.bg, overflow:"hidden", fontFamily:F.serif }}>
-        <Sidebar stepIdx={-1} antagonist={antagonist} onSelect={(i) => { setOutput(null); setStepIdx(i); setPhase("building"); }} onSheet={() => setPhase("sheet")} />
+        <Sidebar stepIdx={-1} antagonist={antagonist} onSelect={(i) => { setOutput(null); setStepIdx(i); setPhase("building"); }} onSheet={() => setPhase("sheet")} onHome={() => { setSavedSession(loadSession()); setPhase("welcome"); }} />
         <div style={{ flex:1, overflowY:"auto" }}>
           <OppositionSheet prot={protagonist} ant={antagonist} onReset={handleReset} />
         </div>
@@ -1668,7 +1854,7 @@ export default function App() {
   return (
     <div style={{ display:"flex", height:"100vh", background:C.bg, overflow:"hidden",
       fontFamily:F.serif }}>
-      <Sidebar stepIdx={stepIdx} antagonist={antagonist} onSelect={(i) => { setOutput(null); setStepIdx(i); }} onSheet={() => setPhase("sheet")} />
+      <Sidebar stepIdx={stepIdx} antagonist={antagonist} onSelect={(i) => { setOutput(null); setStepIdx(i); }} onSheet={() => setPhase("sheet")} onHome={() => { setSavedSession(loadSession()); setPhase("welcome"); }} />
       <div style={{ flex:1, overflowY:"auto" }}>
         <StepView
           step={step} stepIdx={stepIdx}
