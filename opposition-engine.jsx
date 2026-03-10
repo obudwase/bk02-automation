@@ -931,9 +931,26 @@ function ProtRefPanel({ prot, stepId }) {
 // ═══════════════════════════════════════════════════════════════════
 // WELCOME SCREEN
 // ═══════════════════════════════════════════════════════════════════
-function WelcomeScreen({ onBegin, savedSession, onResume }) {
+function WelcomeScreen({ onBegin, savedSession, onResume, onImport }) {
   const [hov, setHov] = useState(false);
+  const [importErr, setImportErr] = useState(null);
   const doneCount = savedSession ? Object.values(savedSession.antagonist).filter(Boolean).length : 0;
+
+  function handleImportFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (!data.protagonist || !data.antagonist) throw new Error("File missing protagonist or antagonist data.");
+        setImportErr(null);
+        onImport(data.protagonist, data.antagonist, data.concept || "");
+      } catch (err) {
+        setImportErr(err.message);
+      }
+    };
+    reader.readAsText(file);
+  }
   const savedStep = savedSession ? STEPS[savedSession.stepIdx] : null;
   const savedDate = savedSession ? new Date(savedSession.savedAt).toLocaleDateString() : null;
 
@@ -999,6 +1016,20 @@ function WelcomeScreen({ onBegin, savedSession, onResume }) {
         </button>
         <div style={{ fontFamily:F.mono, fontSize:"10px", color:C.faint, marginTop:"20px", letterSpacing:"0.08em" }}>
           Requires completed Book 1 Character Engine Sheet
+        </div>
+
+        <div style={{ marginTop:"32px", borderTop:`1px solid ${C.vfaint}`, paddingTop:"24px" }}>
+          <div style={{ fontFamily:F.mono, fontSize:"9px", letterSpacing:"0.15em", color:C.faint, textTransform:"uppercase", marginBottom:"12px" }}>
+            Or import an existing build
+          </div>
+          <label style={{ ...sty.btn(""), cursor:"pointer", display:"inline-block", padding:"10px 24px" }}>
+            Import JSON →
+            <input type="file" accept=".json" style={{ display:"none" }}
+              onChange={e => handleImportFile(e.target.files[0])} />
+          </label>
+          {importErr && (
+            <div style={{ fontFamily:F.mono, fontSize:"11px", color:C.red, marginTop:"10px" }}>{importErr}</div>
+          )}
         </div>
       </div>
     </div>
@@ -1819,6 +1850,19 @@ export default function App() {
     setLoading(false); setError(null);
   }
 
+  function handleImport(protagonist, antagonist, concept) {
+    const doneSteps = STEPS.filter(s => !!antagonist[s.id]);
+    const allDone = doneSteps.length === STEPS.length;
+    const frontierIdx = allDone ? STEPS.length - 1 : STEPS.findIndex(s => !antagonist[s.id]);
+    setProtagonist(protagonist);
+    setAntagonist(antagonist);
+    setConcept(concept);
+    setStepIdx(frontierIdx);
+    saveSession(protagonist, antagonist, concept, frontierIdx);
+    setSavedSession(loadSession());
+    setPhase(allDone ? "sheet" : "building");
+  }
+
   function handleResume() {
     const session = loadSession();
     if (!session) return;
@@ -1830,7 +1874,7 @@ export default function App() {
   }
 
   if (phase === "welcome") {
-    return <WelcomeScreen onBegin={() => setPhase("import")} savedSession={savedSession} onResume={handleResume} />;
+    return <WelcomeScreen onBegin={() => setPhase("import")} savedSession={savedSession} onResume={handleResume} onImport={handleImport} />;
   }
 
   if (phase === "import") {
