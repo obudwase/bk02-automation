@@ -1058,7 +1058,8 @@ function ImportScreen({ onConfirm }) {
 // ═══════════════════════════════════════════════════════════════════
 // SIDEBAR
 // ═══════════════════════════════════════════════════════════════════
-function Sidebar({ stepIdx, antagonist, onSelect }) {
+function Sidebar({ stepIdx, antagonist, onSelect, onSheet }) {
+  const allDone = STEPS.every(s => !!antagonist[s.id]);
   return (
     <div style={{ width:"220px", background:C.panel, borderRight:`1px solid ${C.border}`, padding:"20px 0",
       overflowY:"auto", flexShrink:0, display:"flex", flexDirection:"column" }}>
@@ -1077,18 +1078,21 @@ function Sidebar({ stepIdx, antagonist, onSelect }) {
               const idx = start + si;
               const done = !!antagonist[step.id];
               const active = idx === stepIdx;
+              // Allow clicking the frontier: first step not yet confirmed
+              const frontier = !done && STEPS.slice(0, idx).every(s => !!antagonist[s.id]);
+              const clickable = done || frontier;
               return (
-                <div key={step.id} onClick={() => done && onSelect(idx)}
+                <div key={step.id} onClick={() => clickable && onSelect(idx)}
                   style={{ display:"flex", alignItems:"center", gap:"10px", padding:"7px 16px",
-                    cursor: done ? "pointer" : "default",
+                    cursor: clickable ? "pointer" : "default",
                     background: active ? C.hover : "transparent",
-                    borderLeft: active ? `2px solid ${C.red}` : "2px solid transparent" }}>
-                  <div style={{ fontFamily:F.mono, fontSize:"9px", color: active?C.red:done?C.gold:C.faint,
+                    borderLeft: active ? `2px solid ${C.red}` : frontier ? `2px solid ${C.borderGold}` : "2px solid transparent" }}>
+                  <div style={{ fontFamily:F.mono, fontSize:"9px", color: active?C.red:done?C.gold:frontier?C.goldMuted:C.faint,
                     width:"20px", flexShrink:0, textAlign:"right" }}>
                     {done && !active ? "✓" : step.num}
                   </div>
                   <div style={{ fontFamily:F.mono, fontSize:"9px", letterSpacing:"0.05em", textTransform:"uppercase",
-                    color: active?C.white:done?C.dim:C.faint, lineHeight:1.3 }}>
+                    color: active?C.white:done?C.dim:frontier?C.goldMuted:C.faint, lineHeight:1.3 }}>
                     {step.title}
                   </div>
                 </div>
@@ -1097,6 +1101,14 @@ function Sidebar({ stepIdx, antagonist, onSelect }) {
           </div>
         ))}
       </div>
+      {allDone && onSheet && (
+        <div style={{ padding:"12px 16px", borderTop:`1px solid ${C.border}` }}>
+          <button onClick={onSheet}
+            style={{ ...sty.btn("red"), width:"100%", textAlign:"center", padding:"10px 0" }}>
+            View Sheet →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1104,7 +1116,7 @@ function Sidebar({ stepIdx, antagonist, onSelect }) {
 // ═══════════════════════════════════════════════════════════════════
 // STEP VIEW
 // ═══════════════════════════════════════════════════════════════════
-function StepView({ step, stepIdx, prot, ant, concept, output, loading, error, onGenerate, onConfirm, onRegenerate, onSkip }) {
+function StepView({ step, stepIdx, prot, ant, concept, output, loading, error, onGenerate, onConfirm, onRegenerate, onSkip, onNext }) {
   const partLabel = PART_LABELS[step.part - 1];
   const isFirst = step.isSemiManual && !output && !loading;
   const confirmed = !!ant[step.id];
@@ -1192,8 +1204,15 @@ function StepView({ step, stepIdx, prot, ant, concept, output, loading, error, o
             </>
           )}
           {confirmed && !output && (
-            <div style={{ fontFamily:F.mono, fontSize:"10px", color:C.success, letterSpacing:"0.1em" }}>
-              ✓ Confirmed — Navigate using sidebar to review
+            <div style={{ display:"flex", gap:"12px", alignItems:"center" }}>
+              <div style={{ fontFamily:F.mono, fontSize:"10px", color:C.success, letterSpacing:"0.1em" }}>
+                ✓ Confirmed
+              </div>
+              {onNext && (
+                <button onClick={onNext} style={{ ...sty.btn("red"), padding:"10px 28px" }}>
+                  Next Step →
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -1634,15 +1653,22 @@ export default function App() {
     }} />;
   }
 
+  // Building phase + sheet phase share the sidebar layout
   if (phase === "sheet") {
-    return <OppositionSheet prot={protagonist} ant={antagonist} onReset={handleReset} />;
+    return (
+      <div style={{ display:"flex", height:"100vh", background:C.bg, overflow:"hidden", fontFamily:F.serif }}>
+        <Sidebar stepIdx={-1} antagonist={antagonist} onSelect={(i) => { setOutput(null); setStepIdx(i); setPhase("building"); }} onSheet={() => setPhase("sheet")} />
+        <div style={{ flex:1, overflowY:"auto" }}>
+          <OppositionSheet prot={protagonist} ant={antagonist} onReset={handleReset} />
+        </div>
+      </div>
+    );
   }
 
-  // Building phase
   return (
     <div style={{ display:"flex", height:"100vh", background:C.bg, overflow:"hidden",
       fontFamily:F.serif }}>
-      <Sidebar stepIdx={stepIdx} antagonist={antagonist} onSelect={(i) => { setOutput(null); setStepIdx(i); }} />
+      <Sidebar stepIdx={stepIdx} antagonist={antagonist} onSelect={(i) => { setOutput(null); setStepIdx(i); }} onSheet={() => setPhase("sheet")} />
       <div style={{ flex:1, overflowY:"auto" }}>
         <StepView
           step={step} stepIdx={stepIdx}
@@ -1650,6 +1676,9 @@ export default function App() {
           output={output} loading={loading} error={error}
           onGenerate={handleGenerate} onConfirm={handleConfirm}
           onRegenerate={handleRegenerate} onSkip={step.isOptional ? handleSkip : null}
+          onNext={stepIdx < STEPS.length - 1
+            ? () => { setOutput(null); setStepIdx(stepIdx + 1); }
+            : () => setPhase("sheet")}
         />
       </div>
     </div>
