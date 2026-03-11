@@ -9,7 +9,7 @@ app.use(express.json({ limit: "5mb" }));
 
 const API_KEY = process.env.OPENROUTER_API_KEY;
 const MODEL = process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4-5";
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 
 if (!API_KEY) {
   console.error("ERROR: OPENROUTER_API_KEY is not set in .env");

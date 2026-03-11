@@ -1081,6 +1081,8 @@ function ImportScreen({ onConfirm }) {
     try {
       const data = JSON.parse(text);
       const raw = data.character || data.protagonist || data;
+      // pe-character-sheet.json with embedded _build (full step data)
+      if (raw._build) { setProt(raw._build); setErr(null); return; }
       // If it already has nested structure, use as-is
       if (raw.enneagram || raw.wing_reflex) { setProt(raw); setErr(null); return; }
       // If it has flat Book 1 export keys, normalize
